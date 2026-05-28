@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>COSMO CLEANER</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1362,12 +1365,13 @@ function update(){
   if(pointer && anchor){
     const SENS=1.5;
     const tx=anchor.sx+(pointer.x-anchor.fx)*SENS, ty=anchor.sy+(pointer.y-anchor.fy)*SENS;
-    G.px+=(tx-G.px)*0.5*heavy; G.py+=(ty-G.py)*0.5*heavy;
+    // smoothing factor: 0.35 (was 0.5) — eases the ship into target, reduces "snap-to-finger" feel
+    G.px+=(tx-G.px)*0.35*heavy; G.py+=(ty-G.py)*0.35*heavy;
   }
   let kx=0,ky=0;
   if(keys.ArrowLeft||keys.a) kx-=1; if(keys.ArrowRight||keys.d) kx+=1;
   if(keys.ArrowUp||keys.w) ky-=1; if(keys.ArrowDown||keys.s) ky+=1;
-  G.px+=kx*2.8*heavy; G.py+=ky*2.8*heavy;
+  G.px+=kx*2.2*heavy; G.py+=ky*2.2*heavy;
   G.px=Math.max(6,Math.min(WW-6,G.px)); G.py=Math.max(6,Math.min(WH-6,G.py));
   // resolve collision with static obstacles (push player out)
   for(const o of G.obstacles){
@@ -2247,7 +2251,7 @@ function render(){
   if(G.state==='title'){
     // top status row — like a BIOS header
     text('> SYS_BOOT_OK', 10, 10, UI.green, 1);
-    text('v1.3.0', rightAlign('v1.3.0', LW-10, 1), 10, UI.amberDim, 1);
+    text('v1.3.1', rightAlign('v1.3.1', LW-10, 1), 10, UI.amberDim, 1);
     px(8,22,LW-16,1,UI.amberDark);
     // ===== LOGO =====
     // decorative star burst on each side of the logo
