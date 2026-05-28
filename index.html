@@ -1366,12 +1366,12 @@ function update(){
     const SENS=1.2;
     const tx=anchor.sx+(pointer.x-anchor.fx)*SENS, ty=anchor.sy+(pointer.y-anchor.fy)*SENS;
     // smoothing: ship eases toward the finger/mouse target instead of snapping
-    G.px+=(tx-G.px)*0.30*heavy; G.py+=(ty-G.py)*0.30*heavy;
+    G.px+=(tx-G.px)*0.15*heavy; G.py+=(ty-G.py)*0.15*heavy;
   }
   let kx=0,ky=0;
   if(keys.ArrowLeft||keys.a) kx-=1; if(keys.ArrowRight||keys.d) kx+=1;
   if(keys.ArrowUp||keys.w) ky-=1; if(keys.ArrowDown||keys.s) ky+=1;
-  G.px+=kx*2.8*heavy; G.py+=ky*2.8*heavy;
+  G.px+=kx*3.36*heavy; G.py+=ky*3.36*heavy;
   G.px=Math.max(6,Math.min(WW-6,G.px)); G.py=Math.max(6,Math.min(WH-6,G.py));
   // resolve collision with static obstacles (push player out)
   for(const o of G.obstacles){
@@ -2251,7 +2251,7 @@ function render(){
   if(G.state==='title'){
     // top status row — like a BIOS header
     text('> SYS_BOOT_OK', 10, 10, UI.green, 1);
-    text('v1.3.2', rightAlign('v1.3.2', LW-10, 1), 10, UI.amberDim, 1);
+    text('v1.3.3', rightAlign('v1.3.3', LW-10, 1), 10, UI.amberDim, 1);
     px(8,22,LW-16,1,UI.amberDark);
     // ===== LOGO =====
     // decorative star burst on each side of the logo
