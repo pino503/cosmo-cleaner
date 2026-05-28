@@ -1410,6 +1410,32 @@ function glowCenter(str,y,col,sc,glow){
   sc=sc||1; ctx.font=fontFor(str,sc); const w=ctx.measureText(str).width;
   glowText(str,(LW-w)/2,y,col,sc,glow);
 }
+// returns x immediately right of `label` rendered at (x, sc) — for chaining label+value pairs
+function rightOf(label, x, sc, gap){
+  sc = sc || 1; ctx.font = fontFor(label, sc);
+  return Math.round(x + ctx.measureText(label).width + (gap == null ? 4 : gap));
+}
+// returns x for right-aligning `str` to a right edge — for "v1.0" / "QUEUE: n" etc.
+function rightAlign(str, rightEdge, sc){
+  sc = sc || 1; ctx.font = fontFor(str, sc);
+  return Math.round(rightEdge - ctx.measureText(str).width);
+}
+// auto-shrinks `str` to the largest integer scale (≤maxScale) that fits in maxWidth, then center-draws.
+// pass `glow` (number) to use glowCenter, otherwise plain center.
+function fitCenter(str, y, col, maxScale, maxWidth, glow){
+  maxScale = maxScale || 2;
+  maxWidth = maxWidth || (LW - 12);
+  for(let sc = maxScale; sc >= 1; sc--){
+    ctx.font = fontFor(str, sc);
+    if(ctx.measureText(str).width <= maxWidth){
+      if(glow) glowCenter(str, y, col, sc, glow);
+      else center(str, y, col, sc);
+      return;
+    }
+  }
+  // even sc=1 didn't fit — draw anyway at sc=1 (will clip but at least readable)
+  if(glow) glowCenter(str, y, col, 1, glow); else center(str, y, col, 1);
+}
 // logo-style multi-layer text: drop shadow + dark outline + main fill + glow
 function logoText(str,x,y,mainCol,outlineCol,shadowCol,sc){
   sc=sc||1; ctx.font=fontFor(str,sc); ctx.textBaseline='top';
@@ -1441,7 +1467,7 @@ function glowDisc(cx,cy,r,col,glow){
   ctx.save(); ctx.shadowColor=col; ctx.shadowBlur=glow||6; drawDisc(cx,cy,r,col); ctx.restore();
 }
 
-const SIZE_KB = 94; // filled after build
+const SIZE_KB = 97; // filled after build
 function drawBudget(x,y){
   const cells=20, used=Math.max(1,Math.round(cells*SIZE_KB/1440)), cw=3, ch=4, gap=1;
   for(let i=0;i<cells;i++) px(x+i*(cw+gap), y, cw, ch, i<used?UI.amber:UI.amberDark);
@@ -1610,7 +1636,7 @@ function render(){
   if(G.state==='title'){
     // top status row — like a BIOS header
     text('> SYS_BOOT_OK', 10, 10, UI.green, 1);
-    text('v1.0', LW-26, 10, UI.amberDim, 1);
+    text('v1.0', rightAlign('v1.0', LW-10, 1), 10, UI.amberDim, 1);
     px(8,22,LW-16,1,UI.amberDark);
     // ===== LOGO =====
     // decorative star burst on each side of the logo
@@ -1649,9 +1675,10 @@ function render(){
     const bx=22, by=146;
     text('> CRAFT.... R-1440', bx, by, UI.amberDim, 1);
     text('> MISSION.. CLEANUP', bx, by+11, UI.amberDim, 1);
-    text('> STATUS.. ', bx, by+22, UI.amberDim, 1);
-    text('READY', bx+62, by+22, UI.green, 1);
-    if((G.t>>3)&1) px(bx+93, by+22, 4, 8, UI.green); // cursor
+    text('> STATUS..', bx, by+22, UI.amberDim, 1);
+    const readyX = rightOf('> STATUS..', bx, 1, 6);
+    text('READY', readyX, by+22, UI.green, 1);
+    if((G.t>>3)&1) px(rightOf('READY', readyX, 1, 3), by+22, 4, 8, UI.green); // cursor
     // hovering roomba in a "viewport"
     const vx=LW/2-22, vy=192, vw=44, vh=44;
     px(vx-1,vy-1,vw+2,vh+2,UI.amberDark);
@@ -1668,7 +1695,7 @@ function render(){
     } else {
       glowCenter('> _', 250, UI.amberHi, 1, 8);
     }
-    text('TAP / SPACE', LW/2-22, 264, UI.amberDim, 1);
+    center('TAP / SPACE', 264, UI.amberDim, 1);
     drawBudget(54, 298);
     return;
   }
@@ -1822,7 +1849,7 @@ function render(){
       // half marker
       px(10+Math.round(bw*0.5), 12, 1, 5, UI.amber);
       // phase indicator
-      if(b.phase===2){ text('PH.2', LW-22, 18, UI.red, 1); }
+      if(b.phase===2){ text('PH.2', rightAlign('PH.2', LW-4, 1), 18, UI.red, 1); }
     }
     // PHASE TRANSITION banner — flash for ~70 frames after entering phase 2
     if(b.phase===2 && b.t>0 && b.spitCd>0 && b.spitCd<10 && (G.t>>1&1)){
@@ -2016,23 +2043,34 @@ function render(){
   ctx.fillStyle=UI.bg1; ctx.fillRect(0,0,LW,14);
   ctx.fillStyle=UI.amberDark; ctx.fillRect(0,14,LW,1);
   ctx.restore();
-  // HULL hearts as boxes with brackets
-  text('HULL', 4, 4, UI.amberDim, 1);
-  for(let i=0;i<3;i++){
-    const hx=26+i*7;
-    if(i<G.hp){ ctx.save(); ctx.shadowColor=UI.red; ctx.shadowBlur=4; px(hx,4,5,5,UI.red); ctx.restore(); }
-    else px(hx,4,5,5,UI.redDim);
-  }
-  // AMMO
-  text('AMMO', 54, 4, UI.amberDim, 1);
-  text(String(G.ammo).padStart(2,'0'), 80, 4, G.ammo>0?UI.green:UI.amberDark, 1);
-  // cleanup %
+  // top status bar — chained via measureText so labels never overlap values.
+  // layout: HULL [♥♥♥]  AMMO 00  CLEAN 00%               AREA-N (right-aligned)
+  const HUD_Y = 4, HUD_GAP = 5;
   const pct = G.junkMass>0 ? Math.floor(100*G.collectedMass/G.junkMass) : 0;
   const pctCol = pct>=80?UI.green : pct>=40?UI.amber : UI.red;
-  text('CLEAN', 100, 4, UI.amberDim, 1);
-  text(String(pct).padStart(2,'0')+'%', 130, 4, pctCol, 1);
-  // stage indicator (placeholder for future)
-  text('AREA-'+G.stage, LW-36, 4, UI.amberDim, 1);
+  const ammoStr = String(G.ammo).padStart(2,'0');
+  const pctStr  = String(pct).padStart(2,'0')+'%';
+  const areaStr = 'AREA-'+G.stage;
+  // HULL + 3 hp boxes
+  text('HULL', 4, HUD_Y, UI.amberDim, 1);
+  let cx = rightOf('HULL', 4, 1, 4);
+  for(let i=0;i<3;i++){
+    const hx = cx + i*7;
+    if(i<G.hp){ ctx.save(); ctx.shadowColor=UI.red; ctx.shadowBlur=4; px(hx,HUD_Y,5,5,UI.red); ctx.restore(); }
+    else px(hx,HUD_Y,5,5,UI.redDim);
+  }
+  cx += 3*7 + HUD_GAP;
+  // AMMO value
+  text('AMMO', cx, HUD_Y, UI.amberDim, 1);
+  cx = rightOf('AMMO', cx, 1, 3);
+  text(ammoStr, cx, HUD_Y, G.ammo>0?UI.green:UI.amberDark, 1);
+  cx = rightOf(ammoStr, cx, 1, HUD_GAP);
+  // CLEAN value
+  text('CLEAN', cx, HUD_Y, UI.amberDim, 1);
+  cx = rightOf('CLEAN', cx, 1, 3);
+  text(pctStr, cx, HUD_Y, pctCol, 1);
+  // AREA right-aligned
+  text(areaStr, rightAlign(areaStr, LW-4, 1), HUD_Y, UI.amberDim, 1);
 
   // CARGO gauge — vertical telemetry bar with bracket frame
   const gx=6, gy=22, gw=8, gh=LH-114, CAP=cargoCap();
@@ -2203,9 +2241,12 @@ function render(){
     px(0,28,LW,1,UI.amberDark);
     px(0,64,LW,1,UI.amberDark);
     text('> SYS', 8, 32, UI.amberDim, 1);
-    text('UPGRADE_AVAILABLE', 32, 32, UI.green, 1);
-    glowCenter('SELECT UPGRADE', 46, UI.amber, 2, 12);
-    if(G.puPicks>1) text('QUEUE: '+G.puPicks, LW-58, 32, UI.amber, 1);
+    text('UPGRADE_AVAILABLE', rightOf('> SYS', 8, 1, 4), 32, UI.green, 1);
+    fitCenter('SELECT UPGRADE', 46, UI.amber, 2, LW-12, 12);
+    if(G.puPicks>1){
+      const q = 'QUEUE: '+G.puPicks;
+      text(q, rightAlign(q, LW-8, 1), 32, UI.amber, 1);
+    }
     const lv={suck:G.pu.suck,tank:G.pu.tank,power:G.pu.power};
     for(let i=0;i<G.puCards.length;i++){
       const d=G.puCards[i], r=cardRect(i);
@@ -2222,13 +2263,23 @@ function render(){
       ctx.save(); ctx.shadowColor=d.col; ctx.shadowBlur=hot?8:3;
       px(r.x+9,r.y+9,16,16,d.col); ctx.restore();
       px(r.x+13,r.y+13,8,8,UI.bg0);
-      // texts
+      // texts — number + name on top, description below, Lv right-aligned to card edge
       text((i+1)+'.', r.x+30, r.y+5, d.col, 1);
-      text(d.name, r.x+42, r.y+5, UI.text, 1);
+      const lvStr = 'Lv'+lv[d.k]+'→'+(lv[d.k]+1)+'/'+PU_MAX[d.k];
+      const lvX = rightAlign(lvStr, r.x+r.w-4, 1);
+      // truncate name with ellipsis if it would collide with the Lv text
+      const nameX = rightOf((i+1)+'.', r.x+30, 1, 4);
+      let nameStr = d.name;
+      ctx.font = fontFor(nameStr, 1);
+      while(ctx.measureText(nameStr).width > lvX - nameX - 4 && nameStr.length>3){
+        nameStr = nameStr.slice(0,-1);
+      }
+      if(nameStr !== d.name) nameStr = nameStr.slice(0,-1) + '…';
+      text(nameStr, nameX, r.y+5, UI.text, 1);
       text('> '+d.desc, r.x+30, r.y+18, UI.amberDim, 1);
-      text('Lv'+lv[d.k]+'→'+(lv[d.k]+1)+'/'+PU_MAX[d.k], r.x+r.w-50, r.y+5, d.col, 1);
+      text(lvStr, lvX, r.y+5, d.col, 1);
     }
-    text('> TAP TO SELECT', LW/2-44, CARD.top+G.puCards.length*(CARD.h+CARD.gap)+6, UI.amberDim, 1);
+    center('> TAP TO SELECT', CARD.top+G.puCards.length*(CARD.h+CARD.gap)+6, UI.amberDim, 1);
   }
   if(G.state==='postBoss'){
     px(0,0,LW,LH,'rgba(12,10,6,0.94)');
@@ -2236,7 +2287,7 @@ function render(){
     px(0,28,LW,1,UI.amberDark);
     px(0,72,LW,1,UI.amberDark);
     text('> ALERT', 8, 32, UI.red, 1);
-    text('THREAT_NEUTRALIZED', 44, 32, UI.green, 1);
+    text('THREAT_NEUTRALIZED', rightOf('> ALERT', 8, 1, 4), 32, UI.green, 1);
     glowCenter('BOSS DOWN', 46, UI.amberHi, 2, 14);
     // boss name (the defeated one)
     const stageCfg = STAGES[Math.min(G.stage,TOTAL_STAGES)-1];
@@ -2268,16 +2319,16 @@ function render(){
     const nextCfg = !isFinal ? STAGES[G.stage] : null;
     glowText(isFinal?'[2] RETURN':'[2] WARP', r1.x+12, r1.y+10, UI.amber, 1, hot?6:3);
     text(isFinal?'> 帰還 / 任務完了':('> '+(nextCfg?nextCfg.name:'')), r1.x+12, r1.y+26, UI.amberDim, 1);
-    text('> TAP TO SELECT', LW/2-44, PB_BTN.top+2*(PB_BTN.h+PB_BTN.gap)+10, UI.amberDim, 1);
+    center('> TAP TO SELECT', PB_BTN.top+2*(PB_BTN.h+PB_BTN.gap)+10, UI.amberDim, 1);
   }
   if(G.state==='clear'){
     px(0,0,LW,LH,'rgba(12,10,6,0.92)');
     // header
     px(0,28,LW,1,UI.amberDark);
     text('> SYS', 8, 32, UI.amberDim, 1);
-    text('FINAL_LOG', 32, 32, UI.green, 1);
-    glowCenter('ALL CLEAR', 52, UI.amberHi, 2, 14);
-    text('> 全任務完了', LW/2-30, 86, UI.amber, 1);
+    text('FINAL_LOG', rightOf('> SYS', 8, 1, 4), 32, UI.green, 1);
+    fitCenter('ALL CLEAR', 52, UI.amberHi, 2, LW-12, 14);
+    center('> 全任務完了', 86, UI.amber, 1);
     px(0,102,LW,1,UI.amberDark);
     // total cleanup across all 5 stages (carried + current)
     const totMass = (G.totalMass||0) + G.junkMass;
@@ -2315,14 +2366,14 @@ function render(){
     if(impact>0){ ctx.save(); ctx.globalAlpha=impact*0.4; ctx.fillStyle='#ef4444'; ctx.fillRect(0,0,LW,LH); ctx.restore(); }
     px(0,28,LW,1,UI.redDim);
     text('> ERROR', 8, 32, UI.red, 1);
-    text('CRAFT_DESTROYED', 44, 32, UI.red, 1);
-    // SYSTEM FAILURE — glitch jitter every few frames
+    text('CRAFT_DESTROYED', rightOf('> ERROR', 8, 1, 4), 32, UI.red, 1);
+    // SYSTEM FAILURE — glitch jitter every few frames, auto-fit so it doesn't clip
     const jx = (G.t&3)===0 ? (Math.random()*3-1.5) : 0;
-    glowCenter('SYSTEM FAILURE', 60+jx, UI.red, 2, 14);
+    fitCenter('SYSTEM FAILURE', (60+jx)|0, UI.red, 2, LW-12, 14);
     // a brighter scanline sweeps downward (recurring)
     const sweepY = (G.t*3)%LH;
     ctx.save(); ctx.globalAlpha=0.18; ctx.fillStyle='#ff8080'; ctx.fillRect(0, sweepY, LW, 2); ctx.restore();
-    text('> ロボ大破', LW/2-22, 96, UI.text, 1);
+    center('> ロボ大破', 96, UI.text, 1);
     px(0,116,LW,1,UI.redDim);
     const cpct = G.junkMass>0 ? Math.floor(100*G.collectedMass/G.junkMass) : 0;
     const lx=40;
