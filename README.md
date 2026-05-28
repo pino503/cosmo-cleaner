@@ -6,9 +6,9 @@
 
 ## 遊び方
 
-GitHub Pages で公開後、こちらから遊べます：
+GitHub Pages で公開しています。下記URLからすぐ遊べます：
 
-**▶ Play: _（デプロイ後にURLを追記します）_**
+**▶ Play: https://pino503.github.io/cosmo-cleaner/**
 
 ## 操作
 
