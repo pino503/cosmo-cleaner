@@ -6,15 +6,18 @@
 <title>COSMO CLEANER</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Press+Start+2P&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root{ --teal:#0D9488; }
   *{margin:0;padding:0;box-sizing:border-box;}
   html,body{
-    height:100%; background:#020807; overflow:hidden;
-    font-family:'DotGothic16',monospace;
+    height:100dvh; min-height:100%; background:#020807; overflow:hidden;
+    font-family:'Press Start 2P','DotGothic16',monospace;
     display:flex; align-items:center; justify-content:center;
     -webkit-tap-highlight-color:transparent; touch-action:none;
+    /* respect iOS notch */
+    padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom);
+    padding-left:env(safe-area-inset-left); padding-right:env(safe-area-inset-right);
   }
   body::before{
     content:""; position:fixed; inset:0; pointer-events:none; z-index:3;
@@ -47,11 +50,22 @@ cv.width = LW; cv.height = LH;
 ctx.imageSmoothingEnabled = false;
 
 function fit(){
-  const pad = 6;
-  const s = Math.min((window.innerWidth-pad)/LW, (window.innerHeight-pad)/LH);
-  cv.style.width = (LW*s)+'px'; cv.style.height = (LH*s)+'px';
+  // prefer visualViewport for accuracy on iOS (where the address bar shrinks/grows the viewport)
+  const vv = window.visualViewport;
+  const vw = vv ? vv.width  : window.innerWidth;
+  const vh = vv ? vv.height : window.innerHeight;
+  // pad: zero on phone-sized screens (fill it), small ring on bigger screens
+  const pad = Math.min(vw, vh) < 500 ? 0 : 8;
+  let s = Math.min((vw - pad)/LW, (vh - pad)/LH);
+  // snap to integer when comfortably above 2x — keeps pixel art crisp on big screens
+  if(s >= 2){ s = Math.floor(s); }
+  cv.style.width  = (LW*s)+'px';
+  cv.style.height = (LH*s)+'px';
 }
-window.addEventListener('resize', fit); fit();
+window.addEventListener('resize', fit);
+window.addEventListener('orientationchange', ()=>{ setTimeout(fit, 100); });
+if(window.visualViewport){ window.visualViewport.addEventListener('resize', fit); }
+fit();
 
 /* ---------- palette ---------- */
 const PAL = {
@@ -1342,8 +1356,26 @@ function hurt(){
    RENDER
    ============================================================ */
 function px(x,y,w,h,col){ ctx.fillStyle=col; ctx.fillRect(x|0,y|0,w,h); }
-function text(str,x,y,col,sc){ sc=sc||1; ctx.font=(8*sc)+"px 'DotGothic16',monospace"; ctx.textBaseline='top'; ctx.fillStyle=col; ctx.fillText(str,x|0,y|0); }
-function center(str,y,col,sc){ sc=sc||1; ctx.font=(8*sc)+"px 'DotGothic16',monospace"; const w=ctx.measureText(str).width; text(str,(LW-w)/2,y,col,sc); }
+// font picker:
+//   - small Latin (sc<2) → Silkscreen Bold (condensed 4x6 pixel UI font, fits the
+//     existing tight HUD layout that was designed for DotGothic16)
+//   - large Latin (sc>=2 headings) → Press Start 2P (bold arcade bitmap)
+//   - Japanese (kana/kanji/fullwidth) → DotGothic16 at min 10px
+const HAS_JP = /[　-鿿＀-￯]/;
+function fontFor(str, sc){
+  sc = sc || 1;
+  if(HAS_JP.test(str)){
+    const sz = Math.max(10, Math.round(8*sc));
+    return sz + "px 'DotGothic16',monospace";
+  }
+  if(sc >= 2){
+    return (8*sc) + "px 'Press Start 2P','Silkscreen',monospace";
+  }
+  // small UI: Silkscreen Regular at 6px native — most condensed legible bitmap
+  return Math.round(6*sc) + "px 'Silkscreen','Press Start 2P',monospace";
+}
+function text(str,x,y,col,sc){ sc=sc||1; ctx.font=fontFor(str,sc); ctx.textBaseline='top'; ctx.fillStyle=col; ctx.fillText(str,x|0,y|0); }
+function center(str,y,col,sc){ sc=sc||1; ctx.font=fontFor(str,sc); const w=ctx.measureText(str).width; text(str,(LW-w)/2,y,col,sc); }
 // glowing text — a neon halo behind the glyphs
 // === CRT TERMINAL palette: cyberpunk neon green (Matrix / HUD vibe) ===
 // keys keep the "amber*" names for code stability — only the color values change
@@ -1366,12 +1398,12 @@ const UI = {
 };
 
 function glowText(str,x,y,col,sc,glow){
-  sc=sc||1; ctx.font=(8*sc)+"px 'DotGothic16',monospace"; ctx.textBaseline='top';
+  sc=sc||1; ctx.font=fontFor(str,sc); ctx.textBaseline='top';
   ctx.save(); ctx.shadowColor=col; ctx.shadowBlur=glow||8; ctx.fillStyle=col;
   ctx.fillText(str,x|0,y|0); ctx.fillText(str,x|0,y|0); ctx.restore();
 }
 function glowCenter(str,y,col,sc,glow){
-  sc=sc||1; ctx.font=(8*sc)+"px 'DotGothic16',monospace"; const w=ctx.measureText(str).width;
+  sc=sc||1; ctx.font=fontFor(str,sc); const w=ctx.measureText(str).width;
   glowText(str,(LW-w)/2,y,col,sc,glow);
 }
 // rounded-ish neon rectangle outline with soft glow
@@ -1386,7 +1418,7 @@ function glowDisc(cx,cy,r,col,glow){
   ctx.save(); ctx.shadowColor=col; ctx.shadowBlur=glow||6; drawDisc(cx,cy,r,col); ctx.restore();
 }
 
-const SIZE_KB = 90; // filled after build
+const SIZE_KB = 91; // filled after build
 function drawBudget(x,y){
   const cells=20, used=Math.max(1,Math.round(cells*SIZE_KB/1440)), cw=3, ch=4, gap=1;
   for(let i=0;i<cells;i++) px(x+i*(cw+gap), y, cw, ch, i<used?UI.amber:UI.amberDark);
