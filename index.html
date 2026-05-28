@@ -43,17 +43,43 @@
    Zero asset files. Sprites are text grids, sound is synth.
    ============================================================ */
 
-const LW = 200, LH = 320;
+// LW/LH are MUTABLE — they adapt to the viewport aspect ratio so the game
+// fills more of the screen on fold phones / tablets / desktop. LH is locked
+// at 320 (vertical game), LW grows from 200 (portrait phone) up to 400
+// (~5:4 = fold/tablet/desktop), snapped to 8-pixel increments.
+let LW = 200, LH = 320;
+const BASE_LW = 200, MAX_LW = 400;
 const cv = document.getElementById('cv');
 const ctx = cv.getContext('2d');
 cv.width = LW; cv.height = LH;
 ctx.imageSmoothingEnabled = false;
 
+// recompute UI constants that depend on LW / LH (called whenever LW changes)
+function applyCanvasSize(){
+  cv.width = LW; cv.height = LH;
+  ctx.imageSmoothingEnabled = false;
+  if(typeof FIRE_BTN !== 'undefined'){ FIRE_BTN.x = LW-22; FIRE_BTN.y = LH-24; }
+  if(typeof CARD !== 'undefined'){ CARD.w = Math.min(150, LW-20); }
+  if(typeof PB_BTN !== 'undefined'){ PB_BTN.w = Math.min(160, LW-24); }
+}
+
 function fit(){
-  // prefer visualViewport for accuracy on iOS (where the address bar shrinks/grows the viewport)
+  // prefer visualViewport for accuracy on iOS (address bar collapses)
   const vv = window.visualViewport;
   const vw = vv ? vv.width  : window.innerWidth;
   const vh = vv ? vv.height : window.innerHeight;
+  // pick internal LW based on viewport aspect ratio so wider screens see
+  // more of the world horizontally (fills fold-phone / desktop nicely)
+  const targetAR = vw / vh;
+  const baseAR = BASE_LW / LH;   // 200/320 = 0.625
+  let newLW = BASE_LW;
+  if(targetAR > baseAR){
+    newLW = Math.min(MAX_LW, Math.round((LH * targetAR) / 8) * 8);
+  }
+  if(newLW !== LW){
+    LW = newLW;
+    applyCanvasSize();
+  }
   // pad: zero on phone-sized screens (fill it), small ring on bigger screens
   const pad = Math.min(vw, vh) < 500 ? 0 : 8;
   let s = Math.min((vw - pad)/LW, (vh - pad)/LH);
@@ -1467,7 +1493,7 @@ function glowDisc(cx,cy,r,col,glow){
   ctx.save(); ctx.shadowColor=col; ctx.shadowBlur=glow||6; drawDisc(cx,cy,r,col); ctx.restore();
 }
 
-const SIZE_KB = 97; // filled after build
+const SIZE_KB = 98; // filled after build
 function drawBudget(x,y){
   const cells=20, used=Math.max(1,Math.round(cells*SIZE_KB/1440)), cw=3, ch=4, gap=1;
   for(let i=0;i<cells;i++) px(x+i*(cw+gap), y, cw, ch, i<used?UI.amber:UI.amberDark);
@@ -2392,6 +2418,9 @@ function render(){
 }
 
 /* ---------- loop ---------- */
+// re-fit once after all UI constants (FIRE_BTN/CARD/PB_BTN) are declared,
+// so applyCanvasSize can sync them to the (possibly expanded) LW
+fit();
 function loop(){ update(); render(); requestAnimationFrame(loop); }
 requestAnimationFrame(loop);
 </script>
