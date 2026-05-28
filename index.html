@@ -577,6 +577,7 @@ function reset(stage){
   G.junk=[]; G.shots=[]; G.ebullets=[]; G.missiles=[]; G.mobs=[]; G.parts=[]; G.crates=[]; G.obstacles=[];
   G.planets=[]; G.clouds=[];
   G.flashHp=0; G.hitStop=0; G.bossHitFlash=0;
+  G.bossIntro=0; G.phase2Banner=0;
   G.cargo=0; G.cargoMax=100; G.ammo=0; G.sucking=false; G.fireCd=0; G.dockCd=0; G.shake=0;
   G.collected=0; G.unloaded=0; G.hitsOnBoss=0; G.missed=0; G.junkMass=0; G.collectedMass=0;
   G.crateCd = 360 + Math.random()*240;  // next crate spawn (frames). First crate ~6-10 sec in.
@@ -755,7 +756,16 @@ function updateBoss(){
     b.driftA += (Math.random()-0.5)*0.05;
     b.x += Math.cos(b.driftA)*0.25; b.y += Math.sin(b.driftA)*0.25;
     b.x=Math.max(40,Math.min(WW-40,b.x)); b.y=Math.max(40,Math.min(WH-40,b.y));
-    if(dist<90){ b.awake=true; G.bossFound=true; SFX.missile(); setBGM('boss'); }
+    if(dist<90){
+      b.awake=true; G.bossFound=true;
+      G.bossIntro = 80;          // dramatic reveal banner timer
+      G.shake = Math.max(G.shake, 6);
+      shockwave(b.x, b.y, '#ef4444', 80, 32);
+      shockwave(b.x, b.y, '#fb7185', 50, 28);
+      sparks(b.x, b.y, '#ef4444', 14, 2.2);
+      smoke(b.x, b.y, 6);
+      SFX.missile(); SFX.bosshit(); setBGM('boss');
+    }
     return;
   }
   // awake: slowly chases the player around the field while attacking
@@ -812,6 +822,7 @@ function hitBoss(dmg){
     b.phase=2; b.phaseTime=G.t;
     b.spitCd=10; b.missileCd=30;
     G.shake = Math.max(G.shake, 8);
+    G.phase2Banner = 90;     // big red ENRAGED banner
     // dramatic phase 2 entry — multiple shockwaves + sparks + smoke
     shockwave(b.x, b.y, '#ef4444', 60, 26);
     shockwave(b.x, b.y, '#fbbf24', 40, 22);
@@ -936,6 +947,8 @@ function update(){
   if(G.puFlash>0) G.puFlash--;
   if(G.flashHp>0) G.flashHp--;
   if(G.bossHitFlash>0) G.bossHitFlash--;
+  if(G.bossIntro>0) G.bossIntro--;
+  if(G.phase2Banner>0) G.phase2Banner--;
   // hit-stop: freeze gameplay for a few frames after a heavy impact (player hurt)
   if(G.hitStop>0){ G.hitStop--; return; }
 
@@ -1358,7 +1371,7 @@ function glowDisc(cx,cy,r,col,glow){
   ctx.save(); ctx.shadowColor=col; ctx.shadowBlur=glow||6; drawDisc(cx,cy,r,col); ctx.restore();
 }
 
-const SIZE_KB = 85; // filled after build
+const SIZE_KB = 90; // filled after build
 function drawBudget(x,y){
   const cells=20, used=Math.max(1,Math.round(cells*SIZE_KB/1440)), cw=3, ch=4, gap=1;
   for(let i=0;i<cells;i++) px(x+i*(cw+gap), y, cw, ch, i<used?UI.amber:UI.amberDark);
@@ -1709,10 +1722,32 @@ function render(){
       // (this fires briefly on the frame of transition); use a steadier banner via b.dieT-like timer instead
     }
   }
-  // Better: banner triggered by a dedicated state variable
-  if(G.boss && G.boss.awake && G.boss.phase===2 && !G.boss.dead && (G.t - (G.boss.phaseTime||0))<60 && (G.t>>2&1)){
-    px(0,40,LW,12,'rgba(80,8,8,0.7)');
-    glowCenter('!! PHASE 2 !!', 42, UI.red, 1, 10);
+  // PHASE 2 BANNER — fills the screen briefly with a dramatic red strip
+  if(G.phase2Banner>0 && G.boss){
+    const t = G.phase2Banner, p = t/90;     // 1 -> 0 over the banner's life
+    // dark red wash, fades out
+    ctx.save(); ctx.globalAlpha = Math.min(0.55, p*0.7);
+    ctx.fillStyle = '#3a0a0a'; ctx.fillRect(0, 0, LW, LH); ctx.restore();
+    // chevron-bordered banner strip — slides in from edges
+    const slideIn = Math.min(1, (1-p)*4);    // 0 -> 1 in first quarter
+    const by = LH/2 - 22;
+    const stripW = LW * Math.min(1, slideIn);
+    ctx.save();
+    ctx.fillStyle = 'rgba(80,8,8,0.92)';
+    ctx.fillRect((LW-stripW)/2, by, stripW, 44);
+    // top/bottom accent lines
+    ctx.fillStyle = UI.red;
+    ctx.fillRect((LW-stripW)/2, by, stripW, 1);
+    ctx.fillRect((LW-stripW)/2, by+43, stripW, 1);
+    ctx.restore();
+    if(slideIn >= 0.9){
+      // jittery flash on the text
+      const jx = (G.t&3)===0 ? (Math.random()*2-1) : 0;
+      ctx.save(); ctx.shadowColor = UI.red; ctx.shadowBlur = 14;
+      glowCenter('!! ENRAGED !!', by+8+jx, UI.red, 2, 14);
+      ctx.restore();
+      glowCenter(G.boss.name||'BOSS', by+30, UI.amberHi, 1, 6);
+    }
   }
 
   // suction sparkles (around the roomba) — only when actually sucking (tank not full)
@@ -1944,8 +1979,35 @@ function render(){
     glowCenter(G.crateMsg, cy+2, '#fbbf24', 1, 8);
     ctx.restore();
   }
-  // boss-found banner
-  if(G.bossFound && G.boss && G.boss.awake && !G.boss.dead && G.boss.t<40 && (G.t>>2&1)){
+  // BOSS REVEAL BANNER — full-width dramatic reveal when the boss wakes
+  if(G.bossIntro>0 && G.boss){
+    const t = G.bossIntro, p = t/80;
+    // dim the world
+    ctx.save(); ctx.globalAlpha = Math.min(0.65, p*0.7);
+    ctx.fillStyle = '#1a0408'; ctx.fillRect(0, 0, LW, LH); ctx.restore();
+    // top + bottom black strips slide in from outside (cinematic letterbox)
+    const stripH = 28 * Math.min(1, (1-p)*3);
+    ctx.fillStyle = 'rgba(0,0,0,0.9)';
+    ctx.fillRect(0, 0, LW, stripH);
+    ctx.fillRect(0, LH-stripH, LW, stripH);
+    // red accent lines on the strips
+    ctx.fillStyle = UI.red;
+    ctx.fillRect(0, stripH-1, LW, 1);
+    ctx.fillRect(0, LH-stripH, LW, 1);
+    // big "WARNING" + boss name in center
+    if(p < 0.78){
+      const jx = (G.t&3)===0 ? (Math.random()*2-1) : 0;
+      ctx.save(); ctx.shadowColor = UI.red; ctx.shadowBlur = 14;
+      glowCenter('!! WARNING !!', LH/2 - 22 + jx, UI.red, 1, 12);
+      ctx.restore();
+      // boss name appears slightly delayed (typewriter-ish: scale by reveal amount)
+      const nameReveal = Math.min(1, (1-p)*3);
+      const nameStr = (G.boss.name||'BOSS').slice(0, Math.ceil((G.boss.name||'BOSS').length * nameReveal));
+      glowCenter(nameStr, LH/2 - 4, UI.amberHi, 2, 14);
+      if(nameReveal>=1) glowCenter('▽ HOSTILE DETECTED ▽', LH/2 + 22, UI.amber, 1, 6);
+    }
+  } else if(G.bossFound && G.boss && G.boss.awake && !G.boss.dead && G.boss.t<60 && (G.t>>2&1)){
+    // post-intro lingering threat tag
     px(0,28,LW,12,'rgba(60,8,8,0.7)');
     glowCenter('!! THREAT DETECTED !!', 30, UI.red, 1, 10);
   }
@@ -1954,19 +2016,49 @@ function render(){
     px(0,28,LW,12,'rgba(60,40,8,0.7)');
     glowCenter('> RETURN TO BASE', 30, UI.amber, 1, 8);
   }
-  // STAGE START banner — shown until the player taps to dismiss
+  // STAGE START banner — animated reveal, holds until the player taps to dismiss
   if(G.state==='play' && G.showStageBanner){
     const cfg=STAGES[Math.min(G.stage,TOTAL_STAGES)-1];
     // dim the world behind
-    px(0,0,LW,LH,'rgba(0,0,0,0.55)');
-    // banner box
-    const by = LH/2 - 36;
-    px(0,by,LW,72,'rgba(12,16,12,0.92)');
-    px(0,by,LW,1,UI.amber); px(0,by+71,LW,1,UI.amber);
-    glowCenter('STAGE '+G.stage+' / '+TOTAL_STAGES, by+8, UI.amberDim, 1, 4);
-    glowCenter(cfg.name, by+22, UI.amberHi, 1, 8);
-    center('▽ '+(cfg.bossName||'BOSS')+' awaits', by+38, UI.red, 1);
-    if((G.t>>4)&1) glowCenter('> TAP TO START', by+56, UI.green, 1, 6);
+    px(0,0,LW,LH,'rgba(0,0,0,0.6)');
+    // banner box — slides in from collapsed (h=0) to full height in 14 frames
+    const grow = Math.min(1, G.t/14);
+    const fullH = 96;
+    const h = (fullH*grow)|0;
+    const by = LH/2 - h/2;
+    if(h>2){
+      px(0,by,LW,h,'rgba(12,16,12,0.94)');
+      // top & bottom amber lines + bracket corners
+      px(0,by,LW,1,UI.amber); px(0,by+h-1,LW,1,UI.amber);
+      for(const cn of [[6,by+2,1,1],[LW-7,by+2,-1,1],[6,by+h-3,1,-1],[LW-7,by+h-3,-1,-1]]){
+        px(cn[0],cn[1],6*cn[2]||6,1,UI.amberHi); px(cn[0],cn[1],1,4*cn[3]||4,UI.amberHi);
+      }
+    }
+    // typewriter reveal: each line appears in sequence
+    if(grow>=1){
+      const tt = G.t - 14;     // frames since banner finished growing
+      // Line 1: STAGE X / Y  — instant
+      glowCenter('STAGE '+G.stage+' / '+TOTAL_STAGES, by+10, UI.amberDim, 1, 4);
+      // Line 2: area name — typewriter
+      const name = cfg.name;
+      if(tt>=4){
+        const rev = Math.min(name.length, Math.floor((tt-4)*0.7));
+        glowCenter(name.slice(0,rev)+(rev<name.length && (G.t>>1&1)?'_':''), by+28, UI.amberHi, 1, 8);
+      }
+      // Line 3: boss preview — typewriter after name finishes
+      const nameDone = 4 + name.length/0.7;
+      if(tt>=nameDone){
+        const bn = cfg.bossName||'BOSS';
+        const bossStr = '▽ '+bn+' awaits';
+        const rev = Math.min(bossStr.length, Math.floor((tt-nameDone)*0.7));
+        center(bossStr.slice(0,rev), by+50, UI.red, 1);
+      }
+      // Line 4: tap prompt — blinking, appears last
+      const bossDone = nameDone + (cfg.bossName||'BOSS').length/0.7 + 12;
+      if(tt>=bossDone && ((G.t>>4)&1)){
+        glowCenter('> TAP TO START', by+72, UI.green, 1, 6);
+      }
+    }
   }
 
   // fire button — physical-looking amber arcade button
@@ -2092,26 +2184,42 @@ function render(){
     text('HAULS........', lx, 148, UI.amberDim, 1);
     text(String(G.unloaded).padStart(3,'0'), lx+90, 148, UI.amber, 1);
     px(0,170,LW,1,UI.amberDark);
-    // RANK seal
+    // RANK seal — letter stamps in at t=24 with a flash + scale
     glowCenter('=== RANK ===', 180, UI.amberDim, 1, 4);
-    glowCenter(rank, 196, UI.amberHi, 4, 18);
-    center(label, 244, UI.text, 1);
-    if(G.t>40 && ((G.t>>4)&1)) glowCenter('> RETURN TO TITLE', 274, UI.green, 1, 6);
+    if(G.t >= 24){
+      const stampT = G.t - 24;
+      // first 6 frames: large scale "stamping" down + white flash
+      const stampScale = stampT < 6 ? (4 + (6-stampT)*0.6) : 4;
+      const stampCol = stampT < 4 ? '#ffffff' : UI.amberHi;
+      ctx.save(); ctx.shadowColor = stampCol; ctx.shadowBlur = stampT < 8 ? 26 : 18;
+      glowCenter(rank, 196, stampCol, stampScale, stampT < 8 ? 26 : 18);
+      ctx.restore();
+    }
+    if(G.t >= 40) center(label, 244, UI.text, 1);
+    if(G.t>56 && ((G.t>>4)&1)) glowCenter('> RETURN TO TITLE', 274, UI.green, 1, 6);
   }
   if(G.state==='over'){
-    px(0,0,LW,LH,'rgba(40,8,8,0.88)');
+    // initial red impact flash (decays over first ~15 frames)
+    const impact = Math.max(0, 1 - G.t/15);
+    ctx.save(); ctx.globalAlpha = 0.4 + impact*0.4;
+    ctx.fillStyle = '#2a0408'; ctx.fillRect(0,0,LW,LH); ctx.restore();
+    if(impact>0){ ctx.save(); ctx.globalAlpha=impact*0.4; ctx.fillStyle='#ef4444'; ctx.fillRect(0,0,LW,LH); ctx.restore(); }
     px(0,28,LW,1,UI.redDim);
     text('> ERROR', 8, 32, UI.red, 1);
     text('CRAFT_DESTROYED', 44, 32, UI.red, 1);
-    glowCenter('SYSTEM FAILURE', 60, UI.red, 2, 14);
+    // SYSTEM FAILURE — glitch jitter every few frames
+    const jx = (G.t&3)===0 ? (Math.random()*3-1.5) : 0;
+    glowCenter('SYSTEM FAILURE', 60+jx, UI.red, 2, 14);
+    // a brighter scanline sweeps downward (recurring)
+    const sweepY = (G.t*3)%LH;
+    ctx.save(); ctx.globalAlpha=0.18; ctx.fillStyle='#ff8080'; ctx.fillRect(0, sweepY, LW, 2); ctx.restore();
     text('> ロボ大破', LW/2-22, 96, UI.text, 1);
     px(0,116,LW,1,UI.redDim);
     const cpct = G.junkMass>0 ? Math.floor(100*G.collectedMass/G.junkMass) : 0;
     const lx=40;
-    text('FINAL CLEAN..', lx, 140, UI.amberDim, 1);
-    text(String(cpct).padStart(3,'0')+'%', lx+90, 140, UI.red, 1);
-    text('COLLECTED....', lx, 154, UI.amberDim, 1);
-    text(String(G.collected).padStart(3,'0'), lx+90, 154, UI.amberDim, 1);
+    // stats appear with stagger
+    if(G.t>=20){ text('FINAL CLEAN..', lx, 140, UI.amberDim, 1); text(String(cpct).padStart(3,'0')+'%', lx+90, 140, UI.red, 1); }
+    if(G.t>=30){ text('COLLECTED....', lx, 154, UI.amberDim, 1); text(String(G.collected).padStart(3,'0'), lx+90, 154, UI.amberDim, 1); }
     if(G.t>40 && ((G.t>>4)&1)) glowCenter('> RETRY', 216, UI.amber, 1, 6);
   }
   // damage flash — red wash over the screen on hurt
