@@ -2,7 +2,7 @@
 // Strategy: network-first for HTML so updates always reach the user,
 // cache-first for icons/manifest so the app shell loads instantly offline.
 
-const CACHE_VERSION = "v1.3.3";
+const CACHE_VERSION = "v1.3.4";
 const CACHE_NAME = `cosmo-cleaner-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [

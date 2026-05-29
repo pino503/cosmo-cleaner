@@ -522,8 +522,8 @@ const BALANCE = {
     cargoMax: 100,              // base cargo capacity (overridden by cargoCap() once TANK > 0)
     invulnHit: 70,              // i-frames after losing HP
     invulnShieldAbsorb: 30,     // i-frames after a shield drone absorbs a hit
-    shieldR: 18,                // shield drone orbit radius around player
-    shieldHit: 5,               // shield collision radius vs bullets
+    shieldR: 22,                // shield drone orbit radius around player
+    shieldHit: 7,               // shield collision radius vs bullets
     cargoLossOnHit: 15,         // cargo dropped when player takes HP damage
   },
   // ---- SHOT (compressed shot fired with FIRE) ----
@@ -1795,6 +1795,7 @@ function update(){
     };
     tryBlock(G.ebullets);
     tryBlock(G.missiles);
+    tryBlock(G.flameOrbs);   // GOMILLA 炎弾もシールドで弾き落とせる
   }
 
   // ---- drifting nebula clouds (slow ambient motion) ----
@@ -2271,7 +2272,7 @@ function render(){
   if(G.state==='title'){
     // top status row — like a BIOS header
     text('> SYS_BOOT_OK', 10, 10, UI.green, 1);
-    text('v1.3.3', rightAlign('v1.3.3', LW-10, 1), 10, UI.amberDim, 1);
+    text('v1.3.4', rightAlign('v1.3.4', LW-10, 1), 10, UI.amberDim, 1);
     px(8,22,LW-16,1,UI.amberDark);
     // ===== LOGO =====
     // decorative star burst on each side of the logo
