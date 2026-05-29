@@ -1231,8 +1231,8 @@ function updateBoss(){
 
   // JUNK CORE (boss): orbiting junk satellites — passive (advance angle only; collision handled in update())
   if(b.spr==='boss'){
-    b.orbCount = b.phase>=2 ? 6 : 4;
-    b.orbAng += b.phase>=2 ? 0.07 : 0.05;
+    b.orbCount = b.phase>=3 ? 8 : b.phase>=2 ? 6 : 4;
+    b.orbAng += b.phase>=3 ? 0.09 : b.phase>=2 ? 0.07 : 0.05;
   }
 
   // IRON HUSK (boss2): telegraphed dash charge
@@ -1246,7 +1246,11 @@ function updateBoss(){
       const dsx=b.x-STATION.x, dsy=b.y-STATION.y, dsd=Math.hypot(dsx,dsy);
       if(dsd<SAFE_R+80){ const f=(SAFE_R+80)/(dsd||1); b.x=STATION.x+dsx*f; b.y=STATION.y+dsy*f; b.dashFire=0; }
       b.dashFire--;
-      if(b.dashFire<=0){ shockwave(b.x,b.y,'#fbbf24',24,16); }
+      if(b.dashFire<=0){
+        shockwave(b.x,b.y,'#fbbf24',24,16);
+        // combo: chain another dash (re-aim at player) — p2: 2 dashes, p3: 3
+        if(b.dashCombo>0){ b.dashCombo--; b.dashT=14; b.dashAng=Math.atan2(G.py-b.y,G.px-b.x); sparks(b.x,b.y,'#fde047',6,2.0); }
+      }
     } else if(b.dashT>0){
       b.dashT--;
       if(b.dashT<=0){
@@ -1259,6 +1263,7 @@ function updateBoss(){
       if(b.dashCd<=0){
         b.dashT = 40;
         b.dashAng = Math.atan2(G.py-b.y, G.px-b.x);
+        b.dashCombo = b.phase>=3 ? 2 : b.phase>=2 ? 1 : 0;   // extra chained dashes
         b.dashCd = b.phase>=2 ? 170 : 250;
         blip(180,.10,'square',.05);
       }
@@ -1271,12 +1276,11 @@ function updateBoss(){
       b.flameT--;
       if(b.flameT<=0){
         const sp = 2.0;
-        G.flameOrbs.push({
-          x: b.x, y: b.y,
-          vx: Math.cos(b.flameAng)*sp,
-          vy: Math.sin(b.flameAng)*sp,
-          t: 0, life: 360, dead:false,
-        });
+        const ways = b.phase>=3 ? 5 : b.phase>=2 ? 3 : 1;   // single → 3-way fan → 5-way
+        for(let k=0;k<ways;k++){
+          const a = b.flameAng + (k-(ways-1)/2)*0.30;
+          G.flameOrbs.push({ x:b.x, y:b.y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp, t:0, life:360, dead:false });
+        }
         SFX.rebreak(); SFX.bosshit();
       }
     } else {
@@ -1309,7 +1313,19 @@ function updateBoss(){
         b.tpAlpha = Math.min(1, (30-b.tpT)/30);
       }
       b.tpT--;
-      if(b.tpT<=0){ b.tpAlpha = 1; }
+      if(b.tpT<=0){
+        b.tpAlpha = 1;
+        // ambush: burst a junk ring on arrival (p2+)
+        if(b.phase>=2){
+          const ways=b.phase>=3?12:8;
+          for(let k=0;k<ways;k++){ const a=k*(6.283/ways), sp=1.6;
+            const key=JUNK_KEYS[Math.floor(Math.random()*JUNK_KEYS.length)];
+            G.ebullets.push({x:b.x,y:b.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,key,t:0,danger:true});
+            G.junkMass+=JUNK[key].weight;
+          }
+          shockwave(b.x,b.y,'#c4b5fd',30,16); SFX.rebreak();
+        }
+      }
     } else {
       b.tpCd--;
       if(b.tpCd<=0){
@@ -1334,12 +1350,13 @@ function updateBoss(){
       if(b.summonT<=0){
         // summon if mob count is reasonable
         if((G.mobs||[]).filter(m=>!m.dead).length < 9){
-          const count = b.phase>=2 ? 3 : 1;
+          const count = b.phase>=3 ? 4 : b.phase>=2 ? 3 : 1;
           for(let i=0;i<count;i++){
             const ang = Math.random()*6.283;
             const sx0 = b.x + Math.cos(ang)*22;
             const sy0 = b.y + Math.sin(ang)*22;
-            spawnMob(sx0, sy0, 'split');
+            const kind = (b.phase>=3 && i===0) ? 'rush' : 'split';   // p3 mixes in an aggressive rusher
+            spawnMob(sx0, sy0, kind);
             shockwave(sx0, sy0, '#fde047', 18, 12);
           }
         }
@@ -2509,7 +2526,7 @@ function render(){
   if(G.state==='title'){
     // top status row — like a BIOS header
     text('> SYS_BOOT_OK', 10, 10, UI.green, 1);
-    text('v1.6.0', rightAlign('v1.6.0', LW-10, 1), 10, UI.amberDim, 1);
+    text('v1.7.0', rightAlign('v1.7.0', LW-10, 1), 10, UI.amberDim, 1);
     px(8,22,LW-16,1,UI.amberDark);
     // ===== LOGO =====
     // decorative star burst on each side of the logo
