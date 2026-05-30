@@ -666,8 +666,8 @@ const BALANCE = {
   },
   // ---- PU SCALING (derived stat formulas) ----
   pu: {
-    range:    lv => 14 + lv*14,       // SUCK.RNG: 14 → 84 at Lv5
-    capacity: lv => 100 + lv*36,      // TANK.CAP: 100 → 280 at Lv5
+    range:    lv => lv<=5 ? 14 + lv*14 : 84 + (lv-5)*7,        // SUCK.RNG: 84 at Lv5 → 119 at Lv10 (overcharge +7/Lv)
+    capacity: lv => lv<=5 ? 100 + lv*36 : 280 + (lv-5)*18,     // TANK.CAP: 280 at Lv5 → 370 at Lv10 (overcharge +18/Lv)
     // shotPower() lives in BALANCE.shot.baseDmg / dmgPerLv above
   },
   // ---- PU carryover caps (per-stage transition) ----
@@ -760,7 +760,7 @@ for(let i=0;i<48;i++) G.stars.push({x:Math.random()*LW, y:Math.random()*LH, s:1+
 
 /* ---------- derived stats from power-ups ---------- */
 /* ---------- derived stats from power-ups (all capped at Lv5) ---------- */
-const PU_MAX = { suck:5, tank:5, power:5, hull:2, shield:3, drone:2 };  // SUC/CAP/PWR cap at Lv5; HULL +2 (base 3 → max 5); SHIELD up to 3 drones; CLEANER up to 2
+const PU_MAX = { suck:10, tank:10, power:10, hull:2, shield:3, drone:2 };  // SUC/CAP/PWR overcharge to Lv10 (diminishing past Lv5); HULL +2 (max 5 HP); SHIELD up to 3; CLEANER up to 2
 const DRONE_R = 30;          // cleaner-drone home orbit radius (idle position)
 const DRONE_GRAB = 12;       // junk within this distance of a drone gets collected — and this is the ring we draw
 const DRONE_SEEK = 50;       // a drone only tidies junk within this modest radius of the player (an assist, not a sweep)
@@ -780,7 +780,7 @@ function shipMk(){
   return SPR.ship;
 }
 
-function shotPower(){ return BALANCE.shot.baseDmg + G.pu.power*BALANCE.shot.dmgPerLv; }  // 10 -> 30 at Lv5
+function shotPower(){ const p=G.pu.power; return BALANCE.shot.baseDmg + (p<=5 ? p*BALANCE.shot.dmgPerLv : 30 + (p-5)*3); }  // 42 at Lv5 → 57 at Lv10 (overcharge +3/Lv, kept small vs harder bosses)
 function moveScale(){ return 1; }                          // movement is fixed
 
 /* ---------- junk types ---------- */
@@ -1711,7 +1711,7 @@ function fire(charged){
   const pLv = G.pu.power;
   const baseR = BALANCE.shot.r + Math.floor(pLv/2);                  // 5 → 7 at Lv5
   const shotR = charged ? baseR*2 : baseR;
-  const pierce = charged ? 6 : (pLv >= 5 ? 2 : pLv >= 3 ? 1 : 0);
+  const pierce = charged ? 6 : (pLv >= 8 ? 3 : pLv >= 5 ? 2 : pLv >= 3 ? 1 : 0);  // overcharge Lv8+ = 3 pierce
   const dmg = charged ? shotPower()*3 : shotPower();
   G.shots.push({ x:G.px, y:G.py, vx, vy, r:shotR, dmg,
                  hits:0, pierce, life:BALANCE.shot.life, trail:[], pLv, charged:!!charged });
@@ -3574,6 +3574,7 @@ function render(){
     text(puList[i][0], 4, py, UI.amberDark, 1);
     const max = puList[i][2], val = puList[i][1], col = puList[i][3];
     for(let s=0;s<max;s++){ px(22+s*4, py+2, 3, 3, s<val ? col : UI.amberDark); }
+    if(val>max){ text('+'+(val-max), 22+max*4+2, py, col, 1); }   // overcharge marker, e.g. PWR ▮▮▮▮▮+3
   }
   // progress meter (one row below the last stat row)
   const pw=46, pf=Math.round(pw*G.puProgress/puNeedNow());
