@@ -760,7 +760,7 @@ for(let i=0;i<48;i++) G.stars.push({x:Math.random()*LW, y:Math.random()*LH, s:1+
 
 /* ---------- derived stats from power-ups ---------- */
 /* ---------- derived stats from power-ups (all capped at Lv5) ---------- */
-const PU_MAX = { suck:10, tank:10, power:10, hull:2, shield:3, drone:2 };  // SUC/CAP/PWR overcharge to Lv10 (diminishing past Lv5); HULL +2 (max 5 HP); SHIELD up to 3; CLEANER up to 2
+const PU_MAX = { suck:10, tank:20, power:10, hull:2, shield:3, drone:2 };  // SUC/PWR overcharge to Lv10; TANK to Lv20 (economy stat, safe to grow big); HULL +2 (max 5 HP); SHIELD 3; CLEANER 2
 const DRONE_R = 30;          // cleaner-drone home orbit radius (idle position)
 const DRONE_GRAB = 12;       // junk within this distance of a drone gets collected — and this is the ring we draw
 const DRONE_SEEK = 50;       // a drone only tidies junk within this modest radius of the player (an assist, not a sweep)
