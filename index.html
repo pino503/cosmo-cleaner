@@ -761,6 +761,9 @@ const G = {
   showStageBanner:false,
   // power-up levels
   pu:{ suck:0, tank:0, power:0, hull:0, shield:0, drone:0 },
+  mut:{ suck:null, tank:null, power:null, hull:null, shield:null, drone:null },  // qualitative branch upgrades (run-permanent)
+  suckNovaT:0, shieldRegenT:0, ventT:0,   // mutation timers
+  pickMode:'stat',                         // 'stat' | 'mutation' | 'gadget' — which card set is showing
   cleanDrones:[],               // auto-vacuum drones (CLEANER.DRN PU)
   dronePhase:0,                 // shared orbit phase; drones sit at even offsets so they never overlap
   shieldPhase:0,                // same idea for shield drones
@@ -799,6 +802,11 @@ function shipMk(){
 }
 
 function shotPower(){ return BALANCE.shot.baseDmg + G.pu.power*BALANCE.shot.dmgPerLv; }  // 10 -> 30 at Lv5
+function hasMut(k,id){ return !!(G.mut && G.mut[k]===id); }   // is mutation `id` active on slot `k`?
+function applyMutation(k,id){
+  // most mutations read live via hasMut(); only attack-drones need per-drone state seeded.
+  if(k==='drone' && id==='attack'){ for(const d of (G.cleanDrones||[])) d.shootCd = 30 + Math.random()*30; }
+}
 function moveScale(){ return 1; }                          // movement is fixed
 
 /* ---------- junk types ---------- */
@@ -837,6 +845,37 @@ const PU_DEFS = [
   {k:'shield', name:'SHIELD.DRN',  desc:'護衛ドローン+1',    col:'#5eead4'},  // cyan
   {k:'drone',  name:'CLEANER.DRN', desc:'自動掃除ドローン+1', col:'#a3e635'},  // lime — auto-vacuums junk
 ];
+// ---- MUTATIONS (qualitative branch upgrades) ----
+// Offered after ALL base stats are maxed; one slot per pick (PU_DEFS order); permanent for the run.
+// Effects are read live via hasMut(); only attack-drones need per-drone init in applyMutation().
+const MUT_DEFS = {
+  power: [
+    {id:'shotgun', name:'SCATTER.BORE', desc:'5way拡散弾',      col:'#ff3050'},
+    {id:'railgun', name:'RAIL.LANCE',   desc:'極太貫通/低速',   col:'#ff3050'},
+    {id:'homing',  name:'SEEKER.FRAG',  desc:'弾が敵を追尾',     col:'#ff3050'},
+  ],
+  suck: [
+    {id:'nova',   name:'TRACTOR.NOVA', desc:'4秒毎に全周吸引',  col:'#22ff88'},
+    {id:'vortex', name:'WIDE.VORTEX',  desc:'吸引+50%/弾も吸う', col:'#22ff88'},
+  ],
+  shield: [
+    {id:'reflect', name:'DEFLECT.WALL', desc:'敵弾を反射',       col:'#5eead4'},
+    {id:'nova',    name:'BURST.WARD',   desc:'消滅時に衝撃波',   col:'#5eead4'},
+    {id:'regen',   name:'AUTO.WEAVE',   desc:'10秒毎に再生',     col:'#5eead4'},
+  ],
+  drone: [
+    {id:'attack',    name:'GUN.DRONE',  desc:'ドローンが射撃',   col:'#a3e635'},
+    {id:'collector', name:'WIDE.SWEEP', desc:'回収レンジ拡大',   col:'#a3e635'},
+  ],
+  tank: [
+    {id:'overflow', name:'VENT.PURGE', desc:'満タンで放電',      col:'#aaff33'},
+    {id:'turbo',    name:'TURBO.LOAD', desc:'unload効率2倍',     col:'#aaff33'},
+  ],
+  hull: [
+    {id:'armor', name:'PLATE.WEAVE', desc:'被弾でcargo減なし',  col:'#fb7185'},
+    {id:'phase', name:'PHASE.SKIN',  desc:'無敵時間+60%',       col:'#fb7185'},
+  ],
+};
 
 /* ---------- input ---------- */
 let pointer=null, anchor=null, moveId=null, keys={};
@@ -1053,7 +1092,11 @@ function reset(stage){
     if(cap){ for(const k in G.pu){ if(cap[k]!=null) G.pu[k] = Math.min(G.pu[k], cap[k]); } }
   }
   G.puPicks=0; G.puProgress=0; G.puPicksThisStage=0;
-  G.puFlash=0; G.puName=''; G.puCards=null;
+  G.puFlash=0; G.puName=''; G.puCards=null; G.pickMode='stat';
+  // mutations: persist across stages within a run; wipe only on a fresh Stage-1 start or cheat jump.
+  if(stage===1 || forced){ G.mut={suck:null,tank:null,power:null,hull:null,shield:null,drone:null}; }
+  if(forced && forced.mut){ Object.assign(G.mut, forced.mut); }
+  G.suckNovaT=0; G.shieldRegenT=0; G.ventT=0;
   // Recompute HP / cargo / shields from carried PUs (or zeroes on stage 1)
   G.hpMax = BALANCE.player.hp + G.pu.hull;
   G.hp = G.hpMax;   // full heal between stages — survival reward
@@ -1062,6 +1105,7 @@ function reset(stage){
   for(let i=0;i<G.pu.shield;i++) G.shields.push({ angle: (i/Math.max(1,G.pu.shield))*Math.PI*2 });
   G.cleanDrones = [];
   for(let i=0;i<(G.pu.drone||0);i++) G.cleanDrones.push({ angle: (i/Math.max(1,G.pu.drone))*Math.PI*2, x:G.px, y:G.py, cargo:0 });
+  for(const k in G.mut){ if(G.mut[k]) applyMutation(k, G.mut[k]); }   // re-bind array-dependent mutations (e.g. attack-drones)
   // junk count from stage config (NG+ loop = more litter to keep clean)
   const junkN = Math.round(cfg.junk * (secret ? 1 : DIFF.junk[diffTier(stage)]));
   for(let i=0;i<junkN;i++){
@@ -1636,37 +1680,39 @@ function smoke(x,y,n){
 /* ---------- upgrade picking (pauses the game) ---------- */
 function openPick(){
   if(G.puPicks<=0 || G.puCards) return;
-  // exclude upgrades that hit their per-type cap (no absolute cap during stage —
-  // carryover to next stage is what's bounded, via BALANCE.puCarryByStage).
+  // 1) QUANTITATIVE — any base stat still below its per-type cap
   const avail = PU_DEFS.filter(d => G.pu[d.k] < PU_MAX[d.k]);
-  if(avail.length===0){
-    // all upgrades maxed — drain remaining picks silently
-    G.puPicks=0; G.puProgress=0; return;
+  if(avail.length){
+    G.puCards = avail; G.pickMode='stat'; enterPick(); return;
   }
-  G.puCards = avail;
-  G.sucking=false; pointer=null; anchor=null; moveId=null;
-  G.state='pick';
+  // 2) QUALITATIVE — first maxed slot without a mutation yet (PU_DEFS order, one slot per pick)
+  const muts = PU_DEFS.filter(d => G.pu[d.k]>=PU_MAX[d.k] && !G.mut[d.k] && MUT_DEFS[d.k]);
+  if(muts.length){
+    const s = muts[0];
+    G.puCards = MUT_DEFS[s.k].map(b => ({...b, k:s.k, _mut:true}));
+    G.pickMode='mutation'; enterPick(); return;
+  }
+  // 3) CONSUMABLE — gadget workshop hook is inserted here in Step 3.
+  G.puPicks=0; G.puProgress=0;   // fallback: nothing left to give
 }
+function enterPick(){ G.sucking=false; pointer=null; anchor=null; moveId=null; G.state='pick'; }
 function choosePick(idx){
   if(G.state!=='pick' || !G.puCards) return;
   const def=G.puCards[idx]; if(!def) return;
-  G.pu[def.k]++; G.puPicksThisStage++; G.puName=def.name; G.puFlash=60;
-  // HULL: bump hpMax and refill HP immediately
-  if(def.k==='hull'){
-    G.hpMax = BALANCE.player.hp + G.pu.hull;
-    G.hp = G.hpMax;
+  if(G.pickMode==='mutation'){
+    G.mut[def.k]=def.id; applyMutation(def.k, def.id);
+    G.puName=def.name; G.puFlash=90; SFX.purify();
+  } else {
+    // stat upgrade (existing behavior)
+    G.pu[def.k]++; G.puPicksThisStage++; G.puName=def.name; G.puFlash=60;
+    if(def.k==='hull'){ G.hpMax = BALANCE.player.hp + G.pu.hull; G.hp = G.hpMax; }
+    if(def.k==='shield'){ G.shields.push({angle: Math.random()*Math.PI*2}); }
+    if(def.k==='drone'){ G.cleanDrones.push({angle: Math.random()*Math.PI*2, x:G.px, y:G.py, cargo:0}); }
+    SFX.dock();
   }
-  // SHIELD: spawn a new orbiting drone
-  if(def.k==='shield'){
-    G.shields.push({angle: Math.random()*Math.PI*2});
-  }
-  // CLEANER: spawn a new auto-vacuum drone
-  if(def.k==='drone'){
-    G.cleanDrones.push({angle: Math.random()*Math.PI*2, x:G.px, y:G.py, cargo:0});
-  }
-  SFX.dock();
   G.puPicks--;
   G.puCards=null;
+  G.pickMode='stat';
   if(G.puPicks>0){ openPick(); }   // more queued? show next
   else { G.state='play'; }
 }
@@ -1743,9 +1789,23 @@ function fire(charged){
   const shotR = charged ? baseR*2 : baseR;
   const pierce = charged ? 6 : (pLv >= 5 ? 2 : pLv >= 3 ? 1 : 0);
   const dmg = charged ? shotPower()*3 : shotPower();
-  G.shots.push({ x:G.px, y:G.py, vx, vy, r:shotR, dmg,
-                 hits:0, pierce, life:BALANCE.shot.life, trail:[], pLv, charged:!!charged });
-  G.fireCd = charged ? BALANCE.shot.fireCd*2 : BALANCE.shot.fireCd;
+  // POWER mutation-aware emit (base behavior preserved when no power mutation)
+  const aimA = Math.atan2(vy, vx);
+  const emit = (ang, rr, dm, prc, tag) => G.shots.push({ x:G.px, y:G.py, vx:Math.cos(ang)*sp, vy:Math.sin(ang)*sp,
+      r:rr, dmg:dm, hits:0, pierce:prc, life:BALANCE.shot.life, trail:[], pLv, charged:!!charged, homing:(tag==='homing'), mtag:tag });
+  let fcd = charged ? BALANCE.shot.fireCd*2 : BALANCE.shot.fireCd;
+  if(charged){
+    emit(aimA, shotR, dmg, pierce, 'charged');
+  } else if(hasMut('power','shotgun')){
+    for(let i=0;i<5;i++) emit(aimA+(i-2)*0.22, baseR, dmg*0.6, pierce, 'shotgun');   // crowd clear
+  } else if(hasMut('power','railgun')){
+    emit(aimA, baseR*2, dmg*1.15, 99, 'rail'); fcd = Math.round(fcd*1.5);            // boss melt, slow
+  } else if(hasMut('power','homing')){
+    emit(aimA, baseR, dmg*0.85, pierce, 'homing');                                   // seeking
+  } else {
+    emit(aimA, shotR, dmg, pierce, 'normal');
+  }
+  G.fireCd = fcd;
   SFX.fire(charged ? 2.4 : 1.4 + pLv*0.08);
   burst(G.px,G.py,'c', charged?14:6, charged?2.4:1.5);
 }
@@ -1870,7 +1930,7 @@ function update(){
 
   // ---- suction: round roomba pulls junk & boss-spit from ALL directions ----
   // (disabled entirely when the cargo tank is full — must unload at the base first)
-  const nozX=G.px, nozY=G.py, RNG=suckRange(), CAP=cargoCap();
+  const nozX=G.px, nozY=G.py, RNG=suckRange()*(hasMut('suck','vortex')?1.5:1), CAP=cargoCap();
   const tankFull = G.cargo>=CAP;
   if(G.sucking && !tankFull){
     if((G.t&3)===0) SFX.slurp(Math.min(1,G.cargo/CAP));   // throttle the hum to ~15/s
@@ -1889,6 +1949,35 @@ function update(){
     };
     suck(G.junk);
     suck(G.ebullets);  // suck up the boss's spit attacks
+  }
+  // SUCK mutation: WIDE.VORTEX also pulls in & destroys gunner bullets while sucking
+  if(hasMut('suck','vortex') && G.sucking && !tankFull){
+    for(const e of G.ebullets){ if(e.dead||!e.fromMob) continue; const dx=nozX-e.x,dy=nozY-e.y,d=Math.hypot(dx,dy)||1; if(d<RNG){ e.vx+=dx/d*0.8; e.vy+=dy/d*0.8; if(d<8) e.dead=true; } }
+  }
+  // SUCK mutation: TRACTOR.NOVA — periodic omnidirectional pull (fires even when not actively sucking)
+  if(hasMut('suck','nova')){
+    G.suckNovaT--;
+    if(G.suckNovaT<=0){
+      G.suckNovaT=240; const NR=suckRange()*2.0;
+      const novaPull=(arr)=>{ for(const j of arr){ if(j.dead||j.fromMob) continue; const dx=nozX-j.x,dy=nozY-j.y,d=Math.hypot(dx,dy)||1; if(d<NR){ j.vx+=dx/d*1.4; j.vy+=dy/d*1.4; if(d<9 && !tankFull) collectJunk(j); } } };
+      novaPull(G.junk); novaPull(G.ebullets);
+      shockwave(nozX,nozY,'#22ff88',NR,20); SFX.collect(0.6);
+    }
+  }
+  // TANK mutation: VENT.PURGE — when the tank is full, discharge it as an AoE near enemies
+  if(hasMut('tank','overflow') && tankFull){
+    G.ventT--;
+    if(G.ventT<=0){
+      let near=false;
+      for(const mo of G.mobs){ if(!mo.dead && Math.hypot(mo.x-nozX,mo.y-nozY)<70){ near=true; break; } }
+      if(!near && G.boss && G.boss.awake && !G.boss.dead && Math.hypot(G.boss.x-nozX,G.boss.y-nozY)<90) near=true;
+      if(near){
+        for(const mo of G.mobs){ if(mo.dead) continue; if(Math.hypot(mo.x-nozX,mo.y-nozY)<70){ mo.hp-=Math.ceil(shotPower()/3); if(mo.hp<=0) mo.dead=true; } }
+        if(G.boss && G.boss.awake && !G.boss.dead && Math.hypot(G.boss.x-nozX,G.boss.y-nozY)<90) hitBoss(Math.round(shotPower()*1.5));
+        G.cargo=Math.round(cargoCap()*0.2); G.ventT=90;
+        shockwave(nozX,nozY,'#aaff33',80,22); sparks(nozX,nozY,'#aaff33',16,2.6); G.shake=Math.max(G.shake,6); SFX.rebreak();
+      } else { G.ventT=20; }
+    }
   }
 
   // ---- free junk physics: more friction, soft bounces, strong inward push near edges
@@ -2137,9 +2226,10 @@ function update(){
     G.postBossMenuShown=false;  // re-arm so next dock re-opens the menu
   }
   if(onStation && G.cargo>0 && G.dockCd<=0){
-    const gained=Math.floor(G.cargo/UNLOAD_PER_AMMO);
+    const perAmmo = UNLOAD_PER_AMMO*(hasMut('tank','turbo')?0.5:1);   // TURBO.LOAD: 2x ammo per cargo
+    const gained=Math.floor(G.cargo/perAmmo);
     if(gained>=1){
-      const spent=gained*UNLOAD_PER_AMMO;
+      const spent=gained*perAmmo;
       G.ammo+=gained; G.unloaded+=gained;
       G.cargo-=spent;
       SFX.dock(); burst(STATION.x, STATION.y, 'y', 10, 1.6);
@@ -2156,6 +2246,16 @@ function update(){
     // record trail BEFORE moving, so the head leads the streak
     sh.trail.push({x:sh.x, y:sh.y});
     if(sh.trail.length>8) sh.trail.shift();
+    // SEEKER.FRAG: steer toward the nearest enemy within range
+    if(sh.homing && !sh.done){
+      let tx=null,ty=null,bd=140*140;
+      for(const mo of G.mobs){ if(mo.dead) continue; const dd=(mo.x-sh.x)**2+(mo.y-sh.y)**2; if(dd<bd){bd=dd;tx=mo.x;ty=mo.y;} }
+      if(G.boss&&G.boss.awake&&!G.boss.dead){ const dd=(G.boss.x-sh.x)**2+(G.boss.y-sh.y)**2; if(dd<bd){bd=dd;tx=G.boss.x;ty=G.boss.y;} }
+      if(tx!=null){ const ca=Math.atan2(sh.vy,sh.vx), ta=Math.atan2(ty-sh.y,tx-sh.x); let da=ta-ca;
+        while(da>Math.PI)da-=6.283; while(da<-Math.PI)da+=6.283;
+        const na=ca+Math.max(-0.08,Math.min(0.08,da)), spd=Math.hypot(sh.vx,sh.vy);
+        sh.vx=Math.cos(na)*spd; sh.vy=Math.sin(na)*spd; }
+    }
     sh.x+=(sh.vx||0); sh.y+=sh.vy; sh.life--;
   }
   // shot vs boss
@@ -2247,33 +2347,57 @@ function update(){
   }
   G.parts=G.parts.filter(p=>p.life>0);
 
+  // SHIELD mutation: AUTO.WEAVE — regenerate one shield every 10s up to the quantitative count
+  if(hasMut('shield','regen')){
+    G.shieldRegenT--;
+    if(G.shieldRegenT<=0){
+      G.shieldRegenT=600;
+      if(G.shields.length < G.pu.shield){ G.shields.push({angle:Math.random()*Math.PI*2}); shockwave(G.px,G.py,'#5eead4',20,12); }
+    }
+  }
   // ---- shields: orbit + intercept any enemy projectile that touches them ----
   if(G.shields && G.shields.length){
     // shared orbit phase + even index offsets → shields stay equally spaced (never overlap)
     G.shieldPhase += 0.06; if(G.shieldPhase > Math.PI*2) G.shieldPhase -= Math.PI*2;
     // intercept ebullets (boss spit AND gunner red) and missiles
-    const tryBlock = (arr) => {
+    const tryBlock = (arr, reflectable) => {
       for(const e of arr){
         if(e.dead) continue;
         const n=G.shields.length;
+        if(n<=0) break;
         for(let i=n-1; i>=0; i--){
           const ang = G.shieldPhase + (i/n)*Math.PI*2;
           const sxw = G.px + Math.cos(ang)*SHIELD_R;
           const syw = G.py + Math.sin(ang)*SHIELD_R;
           if(Math.abs(e.x-sxw)<SHIELD_HIT && Math.abs(e.y-syw)<SHIELD_HIT){
+            // DEFLECT.WALL: bounce suckable spit back as a player shot (shield NOT consumed)
+            if(reflectable && hasMut('shield','reflect') && !e.fromMob){
+              e.dead=true;
+              const sp=Math.hypot(e.vx,e.vy)||2;
+              const ba=Math.atan2((G.boss?G.boss.y:syw-40)-syw, (G.boss?G.boss.x:sxw)-sxw);
+              G.shots.push({ x:sxw, y:syw, vx:Math.cos(ba)*sp*1.4, vy:Math.sin(ba)*sp*1.4, r:4, dmg:shotPower()*0.5, hits:0, pierce:1, life:BALANCE.shot.life, trail:[] });
+              shockwave(sxw, syw, '#5eead4', 12, 10); SFX.bosshit();
+              break;
+            }
             e.dead = true;
             G.shields.splice(i,1);
             burst(sxw, syw, 'c', 8, 1.5);
             shockwave(sxw, syw, '#5eead4', 14, 12);
+            // BURST.WARD: AoE shock when a shield is consumed
+            if(hasMut('shield','nova')){
+              for(const mo of G.mobs){ if(mo.dead) continue; if(Math.hypot(mo.x-sxw,mo.y-syw)<40){ mo.hp-=Math.ceil(shotPower()/4); if(mo.hp<=0) mo.dead=true; } }
+              if(G.boss&&G.boss.awake&&!G.boss.dead&&Math.hypot(G.boss.x-sxw,G.boss.y-syw)<60) hitBoss(shotPower());
+              shockwave(sxw, syw, '#a7ffd0', 44, 16); sparks(sxw, syw, '#5eead4', 10, 2.2);
+            }
             SFX.bosshit();
             break;
           }
         }
       }
     };
-    tryBlock(G.ebullets);
-    tryBlock(G.missiles);
-    tryBlock(G.flameOrbs);   // GOMILLA 炎弾もシールドで弾き落とせる
+    tryBlock(G.ebullets, true);
+    tryBlock(G.missiles, false);
+    tryBlock(G.flameOrbs, false);   // GOMILLA 炎弾もシールドで弾き落とせる
   }
 
   // ---- cleaner drones: orbit, auto-vacuum into their own buffer, and ferry it
@@ -2281,12 +2405,27 @@ function update(){
   // tank, so total capacity = ship + Σ drones. ----
   if(G.cleanDrones && G.cleanDrones.length){
     const CAP=cargoCap(), dcap=droneCap(), n=G.cleanDrones.length;
+    const cMut=hasMut('drone','collector');   // WIDE.SWEEP widens reach + speed
+    const SEEK=DRONE_SEEK*(cMut?2.2:1), GRAB=DRONE_GRAB*(cMut?2.2:1), SPD=DRONE_SPD*(cMut?1.4:1);
     // shared orbit phase + an even index offset per drone → drones rest equally spaced.
     G.dronePhase -= 0.045; if(G.dronePhase < 0) G.dronePhase += Math.PI*2;
     for(let di=0; di<n; di++){
       const dr=G.cleanDrones[di];
       if(dr.cargo==null) dr.cargo=0;
       if(dr.x==null){ dr.x=G.px; dr.y=G.py; }
+      // GUN.DRONE: the drone also fires at nearby enemies
+      if(hasMut('drone','attack')){
+        dr.shootCd=(dr.shootCd||0)-1;
+        if(dr.shootCd<=0){
+          let tx=null,ty=null,bd=120*120;
+          for(const mo of G.mobs){ if(mo.dead) continue; const dd=(mo.x-dr.x)**2+(mo.y-dr.y)**2; if(dd<bd){bd=dd;tx=mo.x;ty=mo.y;} }
+          if(G.boss&&G.boss.awake&&!G.boss.dead){ const dd=(G.boss.x-dr.x)**2+(G.boss.y-dr.y)**2; if(dd<bd){bd=dd;tx=G.boss.x;ty=G.boss.y;} }
+          if(tx!=null){ const a=Math.atan2(ty-dr.y,tx-dr.x);
+            G.shots.push({x:dr.x,y:dr.y,vx:Math.cos(a)*4,vy:Math.sin(a)*4,r:3,dmg:shotPower()*0.35,hits:0,pierce:0,life:BALANCE.shot.life,trail:[]});
+            dr.shootCd=48; sparks(dr.x,dr.y,'#a3e635',2,1.4); }
+          else dr.shootCd=20;
+        }
+      }
       // home slot it returns to when there's nothing to clean
       const ang = G.dronePhase + (di/n)*Math.PI*2;
       const hx = G.px + Math.cos(ang)*DRONE_R, hy = G.py + Math.sin(ang)*DRONE_R;
@@ -2297,7 +2436,7 @@ function update(){
       if(dr.cargo < dcap){
         for(const j of G.junk){
           if(j.dead) continue;
-          if(Math.hypot(j.x-G.px, j.y-G.py) > DRONE_SEEK) continue;   // only tidy the player's vicinity
+          if(Math.hypot(j.x-G.px, j.y-G.py) > SEEK) continue;   // only tidy the player's vicinity
           const dd=Math.hypot(j.x-dr.x, j.y-dr.y);
           if(dd<best){ best=dd; tgt=j; }
         }
@@ -2306,10 +2445,10 @@ function update(){
         // physically FLY to the junk and grab it on contact. The drone NEVER touches
         // the junk's velocity — so it can't magnet it in or fling it away.
         const tx=tgt.x-dr.x, ty=tgt.y-dr.y, td=Math.hypot(tx,ty)||1;
-        const step=Math.min(DRONE_SPD, td);
+        const step=Math.min(SPD, td);
         dr.x += tx/td*step; dr.y += ty/td*step;
         if((G.t&3)===0) sparks(dr.x, dr.y, '#a3e635', 1, 1.0);   // faint intake wisp = visibly working
-        if(Math.hypot(tgt.x-dr.x, tgt.y-dr.y) < DRONE_GRAB) swallowToDrone(dr, tgt);   // contact (post-move)
+        if(Math.hypot(tgt.x-dr.x, tgt.y-dr.y) < GRAB) swallowToDrone(dr, tgt);   // contact (post-move)
       } else {
         // nothing nearby (or full) → glide back to the orbit slot
         dr.x += (hx-dr.x)*0.2; dr.y += (hy-dr.y)*0.2;
@@ -2360,7 +2499,7 @@ function hurt(){
     G.shake = Math.max(G.shake, 3);
     return;
   }
-  G.hp--; G.invuln=BALANCE.player.invulnHit; SFX.hurt();
+  G.hp--; G.invuln=Math.round(BALANCE.player.invulnHit*(hasMut('hull','phase')?1.6:1)); SFX.hurt();   // PHASE.SKIN: longer i-frames
   G.shake = Math.max(G.shake, 6);
   burst(G.px,G.py,'r',16,1.8);
   shockwave(G.px, G.py, '#ef4444', 36, 18);
@@ -2368,7 +2507,7 @@ function hurt(){
   G.flashHp = 12;     // red screen flash on hit
   G.hitStop = 4;      // brief freeze for impact weight
   // dropping cargo on hit would be harsh for a proto; keep it but lose a little
-  G.cargo=Math.max(0, G.cargo-BALANCE.player.cargoLossOnHit);
+  if(!hasMut('hull','armor')) G.cargo=Math.max(0, G.cargo-BALANCE.player.cargoLossOnHit);   // PLATE.WEAVE: keep cargo on hit
   if(G.hp<=0){ G.state='over'; G.t=0; stopBGM(); }
 }
 
@@ -3826,8 +3965,8 @@ function render(){
     px(0,28,LW,1,UI.amberDark);
     px(0,64,LW,1,UI.amberDark);
     text('> SYS', 8, 32, UI.amberDim, 1);
-    text('UPGRADE_AVAILABLE', rightOf('> SYS', 8, 1, 4), 32, UI.green, 1);
-    fitCenter('SELECT UPGRADE', 46, UI.amber, 2, LW-12, 12);
+    text(G.pickMode==='mutation'?'MUTATION_AVAILABLE':G.pickMode==='gadget'?'RECYCLE_BAY':'UPGRADE_AVAILABLE', rightOf('> SYS', 8, 1, 4), 32, UI.green, 1);
+    fitCenter(G.pickMode==='mutation'?'CHOOSE MUTATION':G.pickMode==='gadget'?'CRAFT GADGET':'SELECT UPGRADE', 46, UI.amber, 2, LW-12, 12);
     if(G.puPicks>1){
       const q = 'QUEUE: '+G.puPicks;
       text(q, rightAlign(q, LW-8, 1), 32, UI.amber, 1);
@@ -3850,7 +3989,9 @@ function render(){
       px(r.x+13,r.y+13,8,8,UI.bg0);
       // texts — number + name on top, description below, Lv right-aligned to card edge
       text((i+1)+'.', r.x+30, r.y+5, d.col, 1);
-      const lvStr = 'Lv'+lv[d.k]+'→'+(lv[d.k]+1)+'/'+PU_MAX[d.k];
+      const lvStr = d._mut ? '◆ MUT'
+                  : (G.pickMode==='gadget') ? '×'+(G.gadgets?(G.gadgets[d.k]||0):0)
+                  : 'Lv'+lv[d.k]+'→'+(lv[d.k]+1)+'/'+PU_MAX[d.k];
       const lvX = rightAlign(lvStr, r.x+r.w-4, 1);
       // truncate name with ellipsis if it would collide with the Lv text
       const nameX = rightOf((i+1)+'.', r.x+30, 1, 4);
